@@ -1,0 +1,6 @@
+echo ".venv/
+__pycache__/
+*.pyc
+.streamlit/
+feedback_log.csv
+" > .gitignore
