@@ -5,27 +5,50 @@ import pandas as pd
 from datetime import datetime
 import os
 
-# ✅ Set page config first
-st.set_page_config(page_title="Email Classifier", page_icon="📧")
+# -----------------------------
+# Document types dictionary
+# -----------------------------
+document_types = {
+    "Distribution_Notice": ["Distribution Notice", "Distribtn Notice", "Dist Notice", "Distribution", "Distribution Letter", "Dist Letter", "dist letter"],
+    "SOA": ["SOA", "Statement of Account", "Statmnt of Acct", "soa"],
+    "Advance_Tax": ["statement of income", 'addance tax', 'smt of income', 'advance letter', 'tax advance', 'advanc doc'],
+    "Annual_Tax": ['annaully tax report', 'anual tax', 'yearly tax letter', 'annnual tax', 'tax annual', 'annual'],
+    "Form_64C": ["Form 64C", "Form64C", "Frm 64C", "form 64", "64c"],
+    "Drawdown_Grace_Period_Notice": ["Drawdown Grace Period Notice", "Drawdon Grace Notice", "drqwd grace notice"],
+    "Drawdown_Notice": ["Drawdown Notice", "Drawdwn Notice", "draw down ntice", "DDN", "ddn", "drawdown"],
+    "TDS": ['TDS', 'FORM16A', 'frm 16a', 'Tax Deducted at Source', "tds's", 'form 16:A', 'form 16'],
+    "Newsletter": ['newsletter', "news letter", 'news', 'nws lter', 'NEWSLETTER', 'NEWS letter', 'News Letter']
+}
+doc_keywords = [item.lower() for sublist in document_types.values() for item in sublist]
 
-# ----------------------
-# Load models
-# ----------------------
+# -----------------------------
+# Streamlit App Configuration
+# -----------------------------
+st.set_page_config(page_title="Email Classifier", page_icon="📧")
+st.title("📧 Email Classifier — Ontopic vs Offtopic")
+st.markdown("Enter the **first email** from a thread. If it refers to a document, the model will classify it.")
+
+# -----------------------------
+# Load model and vectorizer
+# -----------------------------
 @st.cache_resource
 def load_model():
-    vectorizer = joblib.load("tfidf_vectorizer.joblib")
-    model = joblib.load("email_classifier_model.joblib")
-    label_encoder = joblib.load("label_encoder.joblib")
-    return vectorizer, model, label_encoder
+    vectorizer = joblib.load("tfidf_vectorizer (2).pkl")
+    model = joblib.load("logreg_model (2).pkl")
+    return vectorizer, model
 
-vectorizer, clf, label_encoder = load_model()
+vectorizer, clf = load_model()
 
-# ----------------------
-# Helper functions
-# ----------------------
-def clean_text(text):
+# -----------------------------
+# Email processing helpers
+# -----------------------------
+def contains_document_keywords(text):
     if not isinstance(text, str):
-        return ""
+        return False
+    lower_text = text.lower()
+    return any(keyword in lower_text for keyword in doc_keywords)
+
+def clean_text(text):
     text = text.lower()
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"[^a-z0-9\s]", "", text)
@@ -42,60 +65,52 @@ def log_feedback(email_text, prediction, feedback):
     file_exists = os.path.exists("feedback_log.csv")
     df.to_csv("feedback_log.csv", mode="a", index=False, header=not file_exists)
 
-# ----------------------
-# Streamlit App UI
-# ----------------------
-st.title("📧 Email Classifier — Ontopic vs Offtopic")
-st.markdown("Enter a single email below. The model will classify it, and you can approve or disapprove the result.")
+# -----------------------------
+# Input & Classification
+# -----------------------------
+email_input = st.text_area("✉️ Enter the first email in thread:", height=300)
 
-email_input = st.text_area("✉️ Enter an email to classify:", height=300)
-
-# Session state to track predictions
 if "last_prediction" not in st.session_state:
     st.session_state.last_prediction = None
     st.session_state.last_email = None
 
-# Submit button
 if st.button("🔍 Submit"):
     if not email_input.strip():
         st.warning("Please enter an email.")
     else:
-        cleaned_email = clean_text(email_input)
-        features = vectorizer.transform([cleaned_email])
-        prediction = clf.predict(features)[0]
-        label = label_encoder.inverse_transform([prediction])[0]
+        # Check for document presence
+        if not contains_document_keywords(email_input):
+            prediction_label = "offtopic"
+        else:
+            cleaned_email = clean_text(email_input)
+            features = vectorizer.transform([cleaned_email])
+            prediction_label = clf.predict(features)[0]
 
-        st.session_state.last_prediction = label
+        st.session_state.last_prediction = prediction_label
         st.session_state.last_email = email_input.strip()
 
-        st.success(f"🧠 Prediction: **{label.upper()}**")
+        st.success(f"🧠 Prediction: **{prediction_label.upper()}**")
 
-# Show feedback buttons only after prediction
+# -----------------------------
+# Feedback Section
+# -----------------------------
 if st.session_state.last_prediction:
     st.write("### Was this prediction correct?")
     col1, col2 = st.columns(2)
 
     with col1:
         if st.button("✅ Approve"):
-            log_feedback(
-                st.session_state.last_email,
-                st.session_state.last_prediction,
-                "approved"
-            )
+            log_feedback(st.session_state.last_email, st.session_state.last_prediction, "approved")
             st.success("✅ Feedback recorded as *approved*.")
 
     with col2:
         if st.button("❌ Disapprove"):
-            log_feedback(
-                st.session_state.last_email,
-                st.session_state.last_prediction,
-                "disapproved"
-            )
+            log_feedback(st.session_state.last_email, st.session_state.last_prediction, "disapproved")
             st.warning("❌ Feedback recorded as *disapproved*.")
 
-# ----------------------
+# -----------------------------
 # Download Feedback CSV
-# ----------------------
+# -----------------------------
 if os.path.exists("feedback_log.csv"):
     st.write("---")
     st.subheader("📥 Download Feedback Log")
